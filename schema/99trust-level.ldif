@@ -1,0 +1,21 @@
+dn: cn=schema
+attributeTypes: (
+  1.3.6.1.4.1.53263.999.1.1
+  NAME 'trustLevel'
+  DESC 'Numerical trust level for user accounts (0-127). Used to encode user trust level into MS-PAC Extra SID in Kerberos tickets.'
+  EQUALITY integerMatch
+  ORDERING integerOrderingMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.27
+  SINGLE-VALUE
+  USAGE userApplications
+  X-ORIGIN 'FreeIPA Trust Level Extension'
+  )
+objectClasses: (
+  1.3.6.1.4.1.53263.999.1.2
+  NAME 'ipaTrustLevelObject'
+  DESC 'Auxiliary object class that allows storing trust-level attribute on user entries'
+  SUP top
+  AUXILIARY
+  MAY ( trustLevel )
+  X-ORIGIN 'FreeIPA Trust Level Extension'
+  )

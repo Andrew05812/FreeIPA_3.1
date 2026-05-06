@@ -1,0 +1,115 @@
+diff --git a/daemons/ipa-kdb/ipa_kdb_mspac.c b/daemons/ipa-kdb/ipa_kdb_mspac.c
+--- a/daemons/ipa-kdb/ipa_kdb_mspac.c
++++ b/daemons/ipa-kdb/ipa_kdb_mspac.c
+@@ -26,6 +26,10 @@
+ #include "ipa_kdb_mspac_private.h"
+ 
++#define TRUST_LEVEL_RID_BASE 1000000
++#define TRUST_LEVEL_MAX 127
++
+ static char *user_pac_attrs[] = {
+     "objectClass",
+     "uid",
+@@ -52,6 +56,7 @@ static char *user_pac_attrs[] = {
+     "ipaNTHomeDirectory",
+     "ipaNTHomeDirectoryDrive",
++    "trustLevel",
+     NULL
+ };
+ 
+@@ -162,6 +167,63 @@ static krb5_error_code ipadb_add_asserted_identity(struct ipadb_context *ipactx,
+     return 0;
+ }
+ 
++static krb5_error_code ipadb_add_trust_level_sid(struct ipadb_context *ipactx,
++                                                  LDAPMessage *lentry,
++                                                  TALLOC_CTX *memctx,
++                                                  struct netr_SamInfo3 *info3)
++{
++    struct netr_SidAttr *arr = NULL;
++    uint32_t sidcount = info3->sidcount;
++    int trust_level = 0;
++    int ret;
++    char *sid_str = NULL;
++    struct dom_sid tl_sid;
++
++    if (!ipactx || !ipactx->mspac) {
++        return 0;
++    }
++
++    ret = ipadb_ldap_attr_to_int(ipactx->lcontext, lentry,
++                                 "trustLevel", &trust_level);
++    if (ret == ENOENT) {
++        return 0;
++    }
++    if (ret != 0) {
++        return ret;
++    }
++
++    if (trust_level < 0 || trust_level > TRUST_LEVEL_MAX) {
++        krb5_klog_syslog(LOG_WARNING,
++                         "trust-level value %d out of range [0,%d], skipping",
++                         trust_level, TRUST_LEVEL_MAX);
++        return 0;
++    }
++
++    memcpy(&tl_sid, &ipactx->mspac->domsid, sizeof(struct dom_sid));
++    ret = sid_append_rid(&tl_sid, TRUST_LEVEL_RID_BASE + (uint32_t)trust_level);
++    if (ret != 0) {
++        return ret;
++    }
++
++    sid_str = dom_sid_string(memctx, &tl_sid);
++    if (!sid_str) {
++        return ENOMEM;
++    }
++
++    arr = talloc_realloc(memctx, info3->sids,
++                         struct netr_SidAttr, sidcount + 1);
++    if (!arr) {
++        talloc_free(sid_str);
++        return ENOMEM;
++    }
++
++    arr[sidcount].sid = talloc_zero(arr, struct dom_sid2);
++    if (!arr[sidcount].sid) {
++        talloc_free(sid_str);
++        return ENOMEM;
++    }
++
++    ret = ipadb_string_to_sid(sid_str, arr[sidcount].sid);
++    talloc_free(sid_str);
++    if (ret) {
++        return ret;
++    }
++
++    arr[sidcount].attributes = SE_GROUP_MANDATORY |
++                               SE_GROUP_ENABLED |
++                               SE_GROUP_ENABLED_BY_DEFAULT;
++
++    info3->sids = arr;
++    info3->sidcount = sidcount + 1;
++    info3->base.user_flags |= NETLOGON_EXTRA_SIDS;
++
++    krb5_klog_syslog(LOG_INFO,
++                     "trust-level: added Extra SID for level %d "
++ "(RID=%u)", trust_level,
++                     TRUST_LEVEL_RID_BASE + (uint32_t)trust_level);
++
++    return 0;
++}
++
+ static krb5_error_code
+ is_master_host(struct ipadb_context *ipactx, const char *fqdn, bool *result)
+ {
+@@ -530,7 +592,8 @@ static krb5_error_code ipadb_fill_info3(struct ipadb_context *ipactx,
+     info3->base.reserved = 0; /* Reserved */
+ 
+     ret = ipadb_add_asserted_identity(ipactx, flags, memctx, info3);
+-    return ret;
++    if (ret == 0)
++        ret = ipadb_add_trust_level_sid(ipactx, lentry, memctx, info3);
++    return ret;
+ }
+ 
+ #ifdef HAVE_PAC_REQUESTER_SID
