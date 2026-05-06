@@ -1,4 +1,4 @@
-FROM docker.io/freeipa/freeipa-server:fedora-41
+FROM docker.io/freeipa/freeipa-server:fedora-40
 
 USER root
 

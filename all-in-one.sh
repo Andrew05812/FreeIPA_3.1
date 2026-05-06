@@ -44,7 +44,7 @@ docker run --name "$CONTAINER" \
   -p 53:53 -p 53:53/udp \
   -e IPA_SERVER_IP=0.0.0.0 \
   -v /var/lib/freeipa-data:/data \
-  -d freeipa/freeipa-server:fedora-41 \
+  -d freeipa/freeipa-server:fedora-40 \
   -U --domain="$DOMAIN" --realm="$REALM" \
   -p "$DS_PW" -a "$ADMIN_PW" --no-ntp
 
