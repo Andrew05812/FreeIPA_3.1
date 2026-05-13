@@ -32,7 +32,9 @@ ok "Пакеты установлены"
 # ═══════════════════════════════════════════════════════════
 step "2/6 — Установка FreeIPA сервера (5-10 мин)"
 # ═══════════════════════════════════════════════════════════
-if ! klist -k /etc/krb5.keytab 2>/dev/null | grep -q "HOST"; then
+if ipactl status >/dev/null 2>&1; then
+  ok "FreeIPA сервер уже установлен, пропускаем установку"
+else
   ipa-server-install \
     --domain="$DOMAIN" --realm="$REALM" --hostname="$HOSTNAME" \
     --admin-password="$ADMIN_PW" --ds-password="$DS_PW" \
