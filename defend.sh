@@ -61,8 +61,9 @@ ok "LDAP-схема загружена"
 step "4/6 — Патч ipa-kdb: trust-level → Extra SID в MS-PAC"
 # ═══════════════════════════════════════════════════════════
 dnf download --source freeipa-server 2>/dev/null
-dnf builddep -y --spec freeipa.spec 2>&1 | tail -3
-rpmbuild -bp freeipa.spec 2>&1 | tail -3
+rpm -ivh freeipa-*.src.rpm 2>&1 | tail -3
+dnf builddep -y ~/rpmbuild/SPECS/freeipa.spec 2>&1 | tail -3
+rpmbuild -bp ~/rpmbuild/SPECS/freeipa.spec 2>&1 | tail -3
 
 KDB_DIR=$(find ~/rpmbuild/BUILD -name ipa_kdb_mspac.c | head -1 | xargs dirname)
 cd "$KDB_DIR"
