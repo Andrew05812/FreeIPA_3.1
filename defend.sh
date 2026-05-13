@@ -60,12 +60,23 @@ ok "LDAP-схема загружена"
 # ═══════════════════════════════════════════════════════════
 step "4/6 — Патч ipa-kdb: trust-level → Extra SID в MS-PAC"
 # ═══════════════════════════════════════════════════════════
-dnf download --source freeipa-server 2>/dev/null
-rpm -ivh freeipa-*.src.rpm 2>&1 | tail -3
-dnf builddep -y ~/rpmbuild/SPECS/freeipa.spec 2>&1 | tail -3
-rpmbuild -bp ~/rpmbuild/SPECS/freeipa.spec 2>&1 | tail -3
+SRPM=$(ls freeipa-*.src.rpm 2>/dev/null | head -1)
+if [ -z "$SRPM" ]; then
+  dnf download --source freeipa-server 2>/dev/null
+  SRPM=$(ls freeipa-*.src.rpm 2>/dev/null | head -1)
+fi
+if [ -z "$SRPM" ]; then
+  ls *.src.rpm 2>/dev/null
+  fail "SRPM не найден. Положите freeipa-*.src.rpm в текущую директорию"
+fi
+rpm -ivh "$SRPM" 2>&1 | tail -3
+SPEC=~/rpmbuild/SPECS/freeipa.spec
+[ -f "$SPEC" ] || fail "spec файл не найден после rpm -ivh"
+dnf builddep -y "$SPEC" 2>&1 | tail -3
+rpmbuild -bp "$SPEC" 2>&1 | tail -3
 
 KDB_DIR=$(find ~/rpmbuild/BUILD -name ipa_kdb_mspac.c | head -1 | xargs dirname)
+[ -d "$KDB_DIR" ] || fail "ipa_kdb_mspac.c не найден в BUILD"
 cd "$KDB_DIR"
 
 sed -i '/"ipaNTHomeDirectoryDrive",$/a\    "trustLevel",' ipa_kdb_mspac.c
