@@ -220,12 +220,14 @@ fi
 # ═══════════════════════════════════════════════════════════
 step "5/6 — Создание тестового пользователя + trust-level"
 # ═══════════════════════════════════════════════════════════
-echo "$ADMIN_PW" | kinit admin
+echo "$ADMIN_PW" | kinit admin || fail "kinit admin"
 
 USER_DN="uid=testuser,cn=users,cn=accounts,dc=example,dc=com"
 if ! ldapsearch -Y GSSAPI -b "$USER_DN" -s base uid 2>/dev/null | grep -q "^uid:"; then
-  echo -e "Secret123\nSecret123" | ipa user-add testuser --first=Test --last=User --password || fail "ipa user-add testuser"
+  ipa user-add testuser --first=Test --last=User || fail "ipa user-add testuser"
 fi
+
+ldappasswd -Y GSSAPI -s "NewPass123" "$USER_DN"
 
 HAS_OC=$(ldapsearch -Y GSSAPI -b "$USER_DN" -s base objectClass 2>/dev/null | grep -c "ipaTrustLevelObject" || true)
 if [ "$HAS_OC" -ge 1 ]; then
@@ -246,8 +248,6 @@ add: trustLevel
 trustLevel: 42
 EOF
 fi
-
-ldappasswd -Y GSSAPI -s "NewPass123" "uid=testuser,cn=users,cn=accounts,dc=example,dc=com"
 
 ldapmodify -Y GSSAPI << 'EOF'
 dn: uid=testuser,cn=users,cn=accounts,dc=example,dc=com
