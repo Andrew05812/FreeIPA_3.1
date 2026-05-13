@@ -46,7 +46,11 @@ ok "FreeIPA сервер установлен"
 # ═══════════════════════════════════════════════════════════
 step "3/6 — LDAP-схема: атрибут trustLevel + класс ipaTrustLevelObject"
 # ═══════════════════════════════════════════════════════════
-ldapmodify -D "cn=Directory Manager" -w "$DS_PW" << 'EOF'
+SCHEMA_OK=$(ldapsearch -Y GSSAPI -b cn=schema '(objectClass=*)' attributeTypes 2>/dev/null | grep -c trustLevel || true)
+if [ "$SCHEMA_OK" -ge 1 ]; then
+  ok "LDAP-схема уже загружена"
+else
+  ldapmodify -D "cn=Directory Manager" -w "$DS_PW" << 'EOF'
 dn: cn=schema
 changetype: modify
 add: attributeTypes
@@ -55,11 +59,15 @@ attributeTypes: ( 1.3.6.1.4.1.53263.999.1.1 NAME 'trustLevel' DESC 'Numerical tr
 add: objectClasses
 objectClasses: ( 1.3.6.1.4.1.53263.999.1.2 NAME 'ipaTrustLevelObject' DESC 'Auxiliary for trustLevel' SUP top AUXILIARY MAY ( trustLevel ) X-ORIGIN 'FreeIPA Trust Level' )
 EOF
-ok "LDAP-схема загружена"
+  ok "LDAP-схема загружена"
+fi
 
 # ═══════════════════════════════════════════════════════════
 step "4/6 — Патч ipa-kdb: trust-level → Extra SID в MS-PAC"
 # ═══════════════════════════════════════════════════════════
+if strings /usr/lib64/krb5/plugins/kdb/ipadb.so 2>/dev/null | grep -q "trust-level"; then
+  ok "ipa-kdb патч уже установлен"
+else
 SRPM=$(ls freeipa-*.src.rpm 2>/dev/null | head -1)
 if [ -z "$SRPM" ]; then
   dnf download --source freeipa-server 2>/dev/null
@@ -207,6 +215,7 @@ cp -f /usr/lib64/krb5/plugins/kdb/ipadb.so /usr/lib64/krb5/plugins/kdb/ipadb.so.
 cp -f .libs/ipadb.so /usr/lib64/krb5/plugins/kdb/ipadb.so
 systemctl restart krb5kdc
 ok "ipa-kdb патч установлен, KDC перезапущен"
+fi
 
 # ═══════════════════════════════════════════════════════════
 step "5/6 — Создание тестового пользователя + trust-level"
@@ -218,7 +227,16 @@ if ! ldapsearch -Y GSSAPI -b "$USER_DN" -s base uid 2>/dev/null | grep -q "^uid:
   echo -e "Secret123\nSecret123" | ipa user-add testuser --first=Test --last=User --password || fail "ipa user-add testuser"
 fi
 
-ldapmodify -Y GSSAPI << 'EOF'
+HAS_OC=$(ldapsearch -Y GSSAPI -b "$USER_DN" -s base objectClass 2>/dev/null | grep -c "ipaTrustLevelObject" || true)
+if [ "$HAS_OC" -ge 1 ]; then
+  ldapmodify -Y GSSAPI << EOF
+dn: $USER_DN
+changetype: modify
+replace: trustLevel
+trustLevel: 42
+EOF
+else
+  ldapmodify -Y GSSAPI << 'EOF'
 dn: uid=testuser,cn=users,cn=accounts,dc=example,dc=com
 changetype: modify
 add: objectClass
@@ -227,6 +245,7 @@ objectClass: ipaTrustLevelObject
 add: trustLevel
 trustLevel: 42
 EOF
+fi
 
 ldappasswd -Y GSSAPI -s "NewPass123" "uid=testuser,cn=users,cn=accounts,dc=example,dc=com"
 
