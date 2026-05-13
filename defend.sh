@@ -213,7 +213,10 @@ step "5/6 — Создание тестового пользователя + tru
 # ═══════════════════════════════════════════════════════════
 echo "$ADMIN_PW" | kinit admin
 
-ipa user-add testuser --first=Test --last=User --password <<< $'Secret123\nSecret123' 2>/dev/null || true
+USER_DN="uid=testuser,cn=users,cn=accounts,dc=example,dc=com"
+if ! ldapsearch -Y GSSAPI -b "$USER_DN" -s base uid 2>/dev/null | grep -q "^uid:"; then
+  echo -e "Secret123\nSecret123" | ipa user-add testuser --first=Test --last=User --password || fail "ipa user-add testuser"
+fi
 
 ldapmodify -Y GSSAPI << 'EOF'
 dn: uid=testuser,cn=users,cn=accounts,dc=example,dc=com
