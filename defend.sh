@@ -68,31 +68,33 @@ step "4/6 — Патч ipa-kdb: trust-level → Extra SID в MS-PAC"
 if strings /usr/lib64/krb5/plugins/kdb/ipadb.so 2>/dev/null | grep -q "trust-level"; then
   ok "ipa-kdb патч уже установлен"
 else
-SRPM=$(ls freeipa-*.src.rpm 2>/dev/null | head -1)
-if [ -z "$SRPM" ]; then
-  dnf download --source freeipa-server 2>/dev/null
   SRPM=$(ls freeipa-*.src.rpm 2>/dev/null | head -1)
-fi
-if [ -z "$SRPM" ]; then
-  ls *.src.rpm 2>/dev/null
-  fail "SRPM не найден. Положите freeipa-*.src.rpm в текущую директорию"
-fi
-rpm -ivh "$SRPM" 2>&1 | tail -3
-SPEC=~/rpmbuild/SPECS/freeipa.spec
-[ -f "$SPEC" ] || fail "spec файл не найден после rpm -ivh"
-dnf builddep -y "$SPEC" 2>&1 | tail -3
-rpmbuild -bp "$SPEC" 2>&1 | tail -3
+  if [ -z "$SRPM" ]; then
+    dnf download --source freeipa-server 2>/dev/null
+    SRPM=$(ls freeipa-*.src.rpm 2>/dev/null | head -1)
+  fi
+  if [ -z "$SRPM" ]; then
+    fail "SRPM не найден. Положите freeipa-*.src.rpm в текущую директорию"
+  fi
+  rpm -ivh "$SRPM" 2>&1 | tail -3
+  SPEC=$(find ~/rpmbuild/SPECS -name 'freeipa.spec' | head -1)
+  [ -f "$SPEC" ] || fail "spec файл не найден после rpm -ivh"
+  dnf builddep -y "$SPEC" 2>&1 | tail -3
+  rpmbuild -bp "$SPEC" 2>&1 | tail -3
 
-KDB_DIR=$(find ~/rpmbuild/BUILD -name ipa_kdb_mspac.c | head -1 | xargs dirname)
-[ -d "$KDB_DIR" ] || fail "ipa_kdb_mspac.c не найден в BUILD"
-cd "$KDB_DIR"
+  KDB_DIR=$(find ~/rpmbuild/BUILD -name ipa_kdb_mspac.c | head -1 | xargs dirname)
+  [ -d "$KDB_DIR" ] || fail "ipa_kdb_mspac.c не найден в BUILD"
 
-sed -i '/"ipaNTHomeDirectoryDrive",$/a\    "trustLevel",' ipa_kdb_mspac.c
-sed -i '/#include "ipa_kdb_mspac_private.h"/a\
+  if ! grep -q '"trustLevel"' "$KDB_DIR/ipa_kdb_mspac.c"; then
+    sed -i '/"ipaNTHomeDirectoryDrive",$/a\    "trustLevel",' "$KDB_DIR/ipa_kdb_mspac.c"
+  fi
+  if ! grep -q TRUST_LEVEL_RID_BASE "$KDB_DIR/ipa_kdb_mspac.c"; then
+    sed -i '/#include "ipa_kdb_mspac_private.h"/a\
 #define TRUST_LEVEL_RID_BASE 1000000\
-#define TRUST_LEVEL_MAX 127' ipa_kdb_mspac.c
+#define TRUST_LEVEL_MAX 127' "$KDB_DIR/ipa_kdb_mspac.c"
+  fi
 
-cat > /tmp/trust_func.c << 'FUNCEND'
+  cat > /tmp/trust_func.c << 'FUNCEND'
 
 static krb5_error_code ipadb_add_trust_level_sid(struct ipadb_context *ipactx,
                                                   LDAPMessage *lentry,
@@ -172,26 +174,29 @@ static krb5_error_code ipadb_add_trust_level_sid(struct ipadb_context *ipactx,
 }
 FUNCEND
 
-python3 << 'PYEND'
-with open("ipa_kdb_mspac.c", "r") as f:
+  if ! grep -q ipadb_add_trust_level_sid "$KDB_DIR/ipa_kdb_mspac.c"; then
+    python3 -c "
+with open('$KDB_DIR/ipa_kdb_mspac.c', 'r') as f:
     c = f.read()
-func = open("/tmp/trust_func.c").read()
-c = c.replace("static krb5_error_code\nis_master_host(", func + "\nstatic krb5_error_code\nis_master_host(")
-old = "ret = ipadb_add_asserted_identity(ipactx, flags, memctx, info3);\n    return ret;"
-new = "ret = ipadb_add_asserted_identity(ipactx, flags, memctx, info3);\n    if (ret == 0)\n        ret = ipadb_add_trust_level_sid(ipactx, lentry, memctx, info3);\n    return ret;"
+func = open('/tmp/trust_func.c').read()
+c = c.replace('static krb5_error_code\nis_master_host(', func + '\nstatic krb5_error_code\nis_master_host(')
+old = 'ret = ipadb_add_asserted_identity(ipactx, flags, memctx, info3);\n    return ret;'
+new = 'ret = ipadb_add_asserted_identity(ipactx, flags, memctx, info3);\n    if (ret == 0)\n        ret = ipadb_add_trust_level_sid(ipactx, lentry, memctx, info3);\n    return ret;'
 c = c.replace(old, new, 1)
-with open("ipa_kdb_mspac.c", "w") as f:
+with open('$KDB_DIR/ipa_kdb_mspac.c', 'w') as f:
     f.write(c)
-PYEND
+"
+  fi
 
-# Сборка
-BUILD_ROOT=$(find ~/rpmbuild/BUILD -path "*/freeipa-4.13.1-build/freeipa-4.13.1" -type d | head -1)
-cd "$BUILD_ROOT"
-./configure --prefix=/usr --sysconfdir=/etc 2>&1 | tail -3
-cd util && make -j$(nproc) 2>&1 | tail -3
-cd ../daemons/ipa-kdb && make -j$(nproc) 2>&1 | tail -10
+  BUILD_ROOT=$(find ~/rpmbuild/BUILD -name "freeipa-4.13.1" -type d | grep -v -- '-builddir' | head -1)
+  [ -d "$BUILD_ROOT" ] || BUILD_ROOT=$(find ~/rpmbuild/BUILD -name "freeipa-4.13.1" -type d | head -1)
+  [ -d "$BUILD_ROOT" ] || fail "BUILD_ROOT не найден"
+  cd "$BUILD_ROOT"
+  ./configure --prefix=/usr --sysconfdir=/etc 2>&1 | tail -3
+  cd util && make -j$(nproc) 2>&1 | tail -3
+  cd ../daemons/ipa-kdb && make -j$(nproc) 2>&1 | tail -10
 
-cat > ipadb.map << 'EOF'
+  cat > ipadb.map << 'EOF'
 EXPORTED {
     global: kdb_function_table;
            certauth_ipakdb_initvt;
@@ -200,21 +205,21 @@ EXPORTED {
 };
 EOF
 
-gcc -shared -fPIC -Wl,--no-as-needed -Wl,--version-script=ipadb.map -o .libs/ipadb.so \
-  .libs/ipa_kdb.o .libs/ipa_kdb_mspac.o .libs/ipa_kdb_mspac_v9.o \
-  .libs/ipa_kdb_principals.o .libs/ipa_kdb_passwords.o .libs/ipa_kdb_pwdpolicy.o \
-  .libs/ipa_kdb_delegation.o .libs/ipa_kdb_audit_as.o .libs/ipa_kdb_certauth.o \
-  .libs/ipa_kdb_kdcpolicy.o .libs/ipa_kdb_common.o .libs/ipa_kdb_mkey.o \
-  ../../util/.libs/libutil.a \
-  -lgssapi_krb5 -lkrb5 -lk5crypto -lcom_err -lldap -llber -lpopt \
-  -lsss_idmap -lsss_certmap -lunistring -ltalloc -ltevent \
-  -lsamba-util -lsamba-errors -lndr-krb5pac -lndr-standard -lndr \
-  -lcrypto -lpwquality -ldl
+  gcc -shared -fPIC -Wl,--no-as-needed -Wl,--version-script=ipadb.map -o .libs/ipadb.so \
+    .libs/ipa_kdb.o .libs/ipa_kdb_mspac.o .libs/ipa_kdb_mspac_v9.o \
+    .libs/ipa_kdb_principals.o .libs/ipa_kdb_passwords.o .libs/ipa_kdb_pwdpolicy.o \
+    .libs/ipa_kdb_delegation.o .libs/ipa_kdb_audit_as.o .libs/ipa_kdb_certauth.o \
+    .libs/ipa_kdb_kdcpolicy.o .libs/ipa_kdb_common.o .libs/ipa_kdb_mkey.o \
+    ../../util/.libs/libutil.a \
+    -lgssapi_krb5 -lkrb5 -lk5crypto -lcom_err -lldap -llber -lpopt \
+    -lsss_idmap -lsss_certmap -lunistring -ltalloc -ltevent \
+    -lsamba-util -lsamba-errors -lndr-krb5pac -lndr-standard -lndr \
+    -lcrypto -lpwquality -ldl
 
-cp -f /usr/lib64/krb5/plugins/kdb/ipadb.so /usr/lib64/krb5/plugins/kdb/ipadb.so.orig
-cp -f .libs/ipadb.so /usr/lib64/krb5/plugins/kdb/ipadb.so
-systemctl restart krb5kdc
-ok "ipa-kdb патч установлен, KDC перезапущен"
+  cp -f /usr/lib64/krb5/plugins/kdb/ipadb.so /usr/lib64/krb5/plugins/kdb/ipadb.so.orig
+  cp -f .libs/ipadb.so /usr/lib64/krb5/plugins/kdb/ipadb.so
+  systemctl restart krb5kdc
+  ok "ipa-kdb патч установлен, KDC перезапущен"
 fi
 
 # ═══════════════════════════════════════════════════════════
